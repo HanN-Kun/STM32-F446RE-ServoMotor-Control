@@ -1,0 +1,24 @@
+# Derleme çıktı klasörleri (Build outputs)
+Debug/
+Release/
+
+# Kullanıcıya özel IDE çalışma alanı ayarları ve hata ayıklama yapılandırmaları
+.settings/
+*.launch
+
+# STM32CubeMX geçici proje dosyası
+.mxproject
+
+# Derleme çıktı dosyaları ve yan ürünler
+*.o
+*.elf
+*.hex
+*.bin
+*.map
+*.d
+*.su
+*.cyclo
+
+# İşletim sistemi geçici dosyaları
+.DS_Store
+Thumbs.db
