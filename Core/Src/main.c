@@ -34,6 +34,9 @@
 #define SERVO_MIN_US   500
 #define SERVO_MAX_US   2700
 #define ADC_MAX        4095
+#define MODE_AUTO      0
+#define MODE_POT       1
+#define DEBOUNCE_MS    200
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -47,9 +50,15 @@ ADC_HandleTypeDef hadc1;
 TIM_HandleTypeDef htim3;
 
 /* USER CODE BEGIN PV */
+volatile uint8_t  mode = MODE_AUTO;
+volatile uint32_t last_press_tick = 0;
+
 uint32_t adc_raw = 0;
 uint32_t adc_filtered = 0;
-uint32_t pulse_us = 0;
+uint32_t pulse_us = 1500;
+
+int32_t cycle_angle = 0;
+int32_t cycle_dir = 1;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -99,6 +108,7 @@ int main(void)
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -108,15 +118,27 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	  HAL_ADC_Start(&hadc1);
-	  if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK)
+	  if (mode == MODE_AUTO)
 	  {
-	      adc_raw = HAL_ADC_GetValue(&hadc1);
-	      adc_filtered = (adc_filtered * 7 + adc_raw) / 8;
-	      pulse_us = SERVO_MIN_US + (adc_filtered * (SERVO_MAX_US - SERVO_MIN_US)) / ADC_MAX;
-	      __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, pulse_us);
+	      cycle_angle += cycle_dir;
+	      if (cycle_angle >= 180) { cycle_angle = 180; cycle_dir = -1; }
+	      else if (cycle_angle <= 0) { cycle_angle = 0; cycle_dir = 1; }
+
+	      pulse_us = SERVO_MIN_US + ((uint32_t)cycle_angle * (SERVO_MAX_US - SERVO_MIN_US)) / 180;
 	  }
-	  HAL_ADC_Stop(&hadc1);
+	  else
+	  {
+	      HAL_ADC_Start(&hadc1);
+	      if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK)
+	      {
+	          adc_raw = HAL_ADC_GetValue(&hadc1);
+	          adc_filtered = (adc_filtered * 7 + adc_raw) / 8;
+	          pulse_us = SERVO_MIN_US + (adc_filtered * (SERVO_MAX_US - SERVO_MIN_US)) / ADC_MAX;
+	      }
+	      HAL_ADC_Stop(&hadc1);
+	  }
+
+	  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, pulse_us);
 	  HAL_Delay(10);
   }
   /* USER CODE END 3 */
@@ -287,10 +309,17 @@ static void MX_GPIO_Init(void)
   /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin : PC13 */
+  GPIO_InitStruct.Pin = GPIO_PIN_13;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PA5 */
   GPIO_InitStruct.Pin = GPIO_PIN_5;
@@ -299,13 +328,30 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
   /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
-
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    if (GPIO_Pin == GPIO_PIN_13)
+    {
+        uint32_t now = HAL_GetTick();
+        if ((now - last_press_tick) >= DEBOUNCE_MS)
+        {
+            last_press_tick = now;
+            mode ^= 1;
+            HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5,
+                              (mode == MODE_POT) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+        }
+    }
+}
 /* USER CODE END 4 */
 
 /**
